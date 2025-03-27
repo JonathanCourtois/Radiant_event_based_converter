@@ -1,0 +1,21 @@
+# Python and venv files
+.venv/
+*.lock
+__pycache__/
+# Data folders
+video_sources/
+video_out/
+# Video extensions
+*.mp4
+*.avi
+*.mkv
+*.flv
+*.mov
+*.wmv
+*.webm
+*.vob
+*.m4v
+*.3gp
+*.3g2
+*.mpg
+*.mpeg  

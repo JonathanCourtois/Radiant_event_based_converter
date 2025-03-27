@@ -1,0 +1,12 @@
+[project]
+name = "radiant-evb-model"
+version = "2.0.0"
+description = "Give an event based camera converter for RGB Video."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.10.1",
+    "numpy>=2.2.4",
+    "opencv-python>=4.11.0.86",
+    "tqdm>=4.67.1",
+]
