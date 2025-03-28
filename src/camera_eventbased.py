@@ -5,6 +5,7 @@
 # Description: Give an event based camera converter for video RGB images.
 # -----------------------------------------------------------------------------
 
+import torch
 import numpy as np
 
 class cam_evb():
@@ -19,9 +20,17 @@ class cam_evb():
         """
         self.resolution = input_resolution
         self.threshold  = threshold
-        self.grid_map   = np.zeros((self.resolution[0],self.resolution[1],self.resolution[2]))
-        self.spike      = np.zeros((int(2*self.resolution[0]),self.resolution[1],self.resolution[2]))
+        if torch.cuda.is_available():
+            print("Using GPU")
+            device = 'cuda'
+        else:
+            print("Using CPU")
+            device = 'cpu'
+        
+        self.grid_map   = torch.zeros((self.resolution[0],self.resolution[1],self.resolution[2]),requires_grad=False, device=device)
+        self.spike      = torch.zeros((int(2*self.resolution[0]),self.resolution[1],self.resolution[2]),requires_grad=False, device=device)
         self.noise      = noise_level    
+        self.device     = device
 
         self.multi_threshold    = multi_threshold
         self.spike_mat_max      = 0
@@ -57,23 +66,23 @@ class cam_evb():
 
         if color == "white":
             background = 255
-            c_pos = [0, 0, 255]
+            c_pos = (0, 0, 255)
             c_neg = [255, 0, 0]
         elif color == "grad":
             # color == "blue":
             background = 0
-            c_pos = [255,255,255]
+            c_pos = (255,255,255)
             c_neg = [225,105, 64]
         else :
             # color == "blue":
             background = 0
-            c_pos = [255,255,255]
+            c_pos = (255,255,255)
             c_neg = [225,105, 64]
             
         x = spike.shape[-2]
         y = spike.shape[-1]
         # Create a white image
-        white = np.full((x, y, 3), background, dtype=np.uint8)
+        white = torch.full((x, y, 3), background, requires_grad=False)
         if color == "grad":
             # Pushing pos event to 128-255 and neg event to 0-127
             pos_rgb     = spike[[0,2,4],:,:]
@@ -81,10 +90,11 @@ class cam_evb():
             merge_rgb   = pos_rgb-neg_rgb
             merge_rgb[merge_rgb>0] = merge_rgb[merge_rgb>0]/self.spike_mat_max*127 + 128
             merge_rgb[merge_rgb<0] = merge_rgb[merge_rgb<0]/self.spike_mat_max*127
-            white = merge_rgb.astype(np.uint8).transpose(1,2,0)
+            # white = merge_rgb.astype(torch.uint8).transpose(1,2,0)
+            white = merge_rgb.permute(1,2,0)
         else:
             # Add positive color dot to the image
-            white[spike[0]>=1] = c_pos
+            # whit shape x,y,3 where x,y
             # Add negative color dot to the image
             white[spike[1]>=1] = c_neg
 
@@ -97,25 +107,27 @@ class cam_evb():
         """
         # add gaussian noise on img
         if self.noise is not None:
-            tmp = np.random.normal(0, self.noise, img.shape)
+            # tmp = np.random.normal(0, self.noise, img.shape)
+            tmp = torch.randn_like(img)*self.noise
+            tmp.to(self.device)
             offset = 3e-10
             tmp[tmp<offset] = 0
             
             img = img + tmp
         img[img<=0] = 1e-10
                     
-        pos = ((np.log(img) - self.grid_map) >  self.threshold)
-        neg = ((np.log(img) - self.grid_map) < -self.threshold)
+        pos = ((torch.log(img) - self.grid_map) >  self.threshold)
+        neg = ((torch.log(img) - self.grid_map) < -self.threshold)
         for i in range(self.resolution[0]):
             # print(f"{self.spike.shape} {pos.shape} {neg.shape}")
             if self.multi_threshold:
-                self.spike[i*2]     = pos[i]*((np.log(img[i]) - self.grid_map[i])*((np.log(img[i]) - self.grid_map[i]) >  self.threshold)//self.threshold)
-                self.spike[i*2+1]   = neg[i]*((np.log(img[i]) - self.grid_map[i])*((np.log(img[i]) - self.grid_map[i]) < -self.threshold)//-self.threshold)
+                self.spike[i*2]     = pos[i]*((torch.log(img[i]) - self.grid_map[i])*((torch.log(img[i]) - self.grid_map[i]) >  self.threshold)//self.threshold)
+                self.spike[i*2+1]   = neg[i]*((torch.log(img[i]) - self.grid_map[i])*((torch.log(img[i]) - self.grid_map[i]) < -self.threshold)//-self.threshold)
             else:
                 self.spike[i*2]     = pos[i]*1
                 self.spike[i*2+1]   = neg[i]*1
-        self.grid_map[pos] = np.log(img)[pos]
-        self.grid_map[neg] = np.log(img)[neg]
+        self.grid_map[pos] = torch.log(img)[pos]
+        self.grid_map[neg] = torch.log(img)[neg]
         
         if self.spike.max() > self.spike_mat_max:
             self.spike_mat_max = self.spike.max()
@@ -129,7 +141,7 @@ class cam_evb():
                 H in range [0, 360], S and V in range [0, 1]
         """
         # Normalize RGB values to range [0, 1]
-        rgb_normalized = rgb_img.astype(np.float32) / 255.0
+        rgb_normalized = rgb_img.type(torch.float32) / 255.0
         
         # Reshape the image to 2D array of pixels
         pixels = rgb_normalized.reshape(-1, 3)
@@ -138,14 +150,14 @@ class cam_evb():
         r, g, b = pixels[:, 0], pixels[:, 1], pixels[:, 2]
         
         # Calculate Value (V)
-        v = np.max(pixels, axis=1)
+        v = torch.max(pixels, axis=1)
         
         # Calculate Saturation (S)
-        delta = v - np.min(pixels, axis=1)
-        s = np.where(v != 0, delta/v, 0)
+        delta = v - torch.min(pixels, axis=1)
+        s = torch.where(v != 0, delta/v, 0)
         
         # Calculate Hue (H)
-        h = np.zeros_like(v)
+        h = torch.zeros_like(v)
         
         # When v == delta, it means only one color has non-zero value
         non_zero_delta_mask = (delta != 0)
@@ -163,10 +175,10 @@ class cam_evb():
         h[blue_max_mask] = 60 * (4 + (r[blue_max_mask] - g[blue_max_mask]) / delta[blue_max_mask])
         
         # Make sure hue is in [0, 360]
-        h = np.mod(h, 360)
+        h = h % 360
         
         # Stack the HSV channels and reshape back to original image shape
-        hsv = np.stack([h, s, v], axis=1)
+        hsv = torch.stack([h, s, v], dim=1)
         hsv_img = hsv.reshape(rgb_img.shape)
         
         return hsv_img

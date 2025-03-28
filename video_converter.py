@@ -5,7 +5,11 @@
 # Description: Give an event based camera converter for video RGB images.
 # -----------------------------------------------------------------------------
 
+from importlib.metadata import requires
+import re
+from numpy import require
 import tqdm
+import torch
 import numpy as np
 import os
 import cv2
@@ -22,9 +26,10 @@ def get_cv2_infos(cap):
 
 def merge_channel_to_polarity(spike_video_frames):
         # we can then choose to have a 2*x*y images shape merging pos/neg polarity
+        print(f"{spike_video_frames.shape=}")
         pos_rgb = spike_video_frames[:,[0,2,4],:,:].sum(axis=1)
         neg_rgb = spike_video_frames[:,[1,3,5],:,:].sum(axis=1)
-        spike_video_frames_rgb_merged = np.stack([pos_rgb,neg_rgb],axis=1)
+        spike_video_frames_rgb_merged = torch.stack([pos_rgb,neg_rgb],dim=1)
         return spike_video_frames_rgb_merged
 
 def merge_polarity_to_rgb(spike_video_frames):
@@ -32,7 +37,7 @@ def merge_polarity_to_rgb(spike_video_frames):
         red     = spike_video_frames[:,0,:,:]-spike_video_frames[:,1,:,:]
         green   = spike_video_frames[:,2,:,:]-spike_video_frames[:,3,:,:]
         blue    = spike_video_frames[:,4,:,:]-spike_video_frames[:,5,:,:]
-        spike_video_frames_rgb_merged = np.stack([red,green,blue],axis=1)
+        spike_video_frames_rgb_merged = torch.stack([red,green,blue],dim=1)
         return spike_video_frames_rgb_merged
 
 def convert_mp4_video(path_to_video, output_path=None, event_camera=None, merge_method="first_channel", args=None):
@@ -60,43 +65,54 @@ def convert_mp4_video(path_to_video, output_path=None, event_camera=None, merge_
     spike_video_frames  = []
     rgb_video_frames    = []
 
-    with tqdm.tqdm(total=frame_count) as pbar:
-        while ret:
-            ret, image  = cap.read() # image is a numpy array with shape (height, width, 3)
-            if args.input_rate is not None:
-                if args.input_rate < 1:
-                    raise ValueError("input_rate must be greater than 1.")
-                if i%args.input_rate != 0: # Skip some frames to match frequency in ideal video without frequency issue there is no need to do this
-                    i += 1
-                    pbar.update(1)
-                    continue
-            if not ret:
-                break
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
 
-            event_camera.update(image.transpose(2,0,1))
-            spike_mat = event_camera.spike
-            spike_video_frames.append(spike_mat)
-
-            if merge_method == "first_channel":
-                # using out_rgb tool that use the first color channel only (R) to pos/neg polarity in v1.0
-                rgb_out = event_camera.out_rgb()
-            elif merge_method == "polarity":
-                # display result with channel sumed to polarity "c_to_p"
-                c_to_p = merge_channel_to_polarity(np.array([spike_mat]))[0]
-                rgb_out = event_camera.convert_event_frame_to_RGB(color="blue", spike_frame=c_to_p)
-            elif merge_method == "channel":
-                # display result with polarity merged to rgb channels "p_to_c"
-                rgb_out = event_camera.convert_event_frame_to_RGB(color="grad", spike_frame=spike_mat)
-            else:
-                raise ValueError(f"merge_method {merge_method} not supported.") 
+    # out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (height, width))
+    with torch.no_grad():
+        with tqdm.tqdm(total=frame_count) as pbar:
+            while ret:
+                ret, image  = cap.read() # image is a numpy array with shape (height, width, 3)
+                if args.input_rate is not None:
+                    if args.input_rate < 1:
+                        raise ValueError("input_rate must be greater than 1.")
+                    if i%args.input_rate != 0: # Skip some frames to match frequency in ideal video without frequency issue there is no need to do this
+                        i += 1
+                        pbar.update(1)
+                        continue
+                if not ret:
+                    break
                 
-            rgb_video_frames.append(rgb_out)
-            i += 1
-            pbar.update(1)
-        cap.release()
-        cv2.destroyAllWindows()
-        pbar.close()
-    
+                image = torch.tensor(image.transpose(2,0,1),requires_grad=False).float().to(device)
+                event_camera.update(image)
+                spike_mat = event_camera.spike
+                spike_video_frames.append(spike_mat)
+
+                if merge_method == "first_channel":
+                    # using out_rgb tool that use the first color channel only (R) to pos/neg polarity in v1.0
+                    rgb_out = event_camera.out_rgb()
+                elif merge_method == "polarity":
+                    # display result with channel sumed to polarity "c_to_p"
+                    c_to_p = merge_channel_to_polarity(torch.tensor(spike_mat, requires_grad=False).unsqueeze(0)).squeeze(0)
+                    rgb_out = event_camera.convert_event_frame_to_RGB(color="blue", spike_frame=c_to_p)
+                elif merge_method == "channel":
+                    # display result with polarity merged to rgb channels "p_to_c"
+                    rgb_out = event_camera.convert_event_frame_to_RGB(color="grad", spike_frame=spike_mat)
+                else:
+                    raise ValueError(f"merge_method {merge_method} not supported.") 
+                    
+                rgb_video_frames.append(rgb_out.cpu().numpy().astype(np.uint8))
+                # out.write(rgb_out.cpu().numpy().astype(np.uint8))
+                i += 1
+                pbar.update(1)
+            cap.release()
+            cv2.destroyAllWindows()
+            pbar.close()
+
+    #     out.release()
+    # raise()
 
     # Save the video
     print(f"fps: {fps} frame_count: {frame_count} rgb_video_frames: {len(rgb_video_frames)}")
@@ -111,7 +127,8 @@ def convert_mp4_video(path_to_video, output_path=None, event_camera=None, merge_
     if output_path is not None:
         print(f"Saving video to {output_path}")
         out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (rgb_video_frames[0].shape[1], rgb_video_frames[0].shape[0]))
-        for frame in rgb_video_frames:
+        for i in range(len(rgb_video_frames)):
+            frame = rgb_video_frames.pop(0)
             out.write(frame)
         out.release()
 
