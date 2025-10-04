@@ -5,15 +5,11 @@
 # Description: Give an event based camera converter for video RGB images.
 # -----------------------------------------------------------------------------
 
-from importlib.metadata import requires
-import re
-from numpy import require
 import tqdm
 import torch
 import numpy as np
 import os
 import cv2
-import matplotlib.pyplot as plt
 from src.camera_eventbased import cam_evb
 import argparse
 

@@ -67,7 +67,7 @@ class cam_evb():
         if color == "white":
             background = 255
             c_pos = (0, 0, 255)
-            c_neg = [255, 0, 0]
+            c_neg = (255, 0, 0)
         elif color == "grad":
             # color == "blue":
             background = 0
@@ -81,8 +81,8 @@ class cam_evb():
             
         x = spike.shape[-2]
         y = spike.shape[-1]
-        # Create a white image
-        white = torch.full((x, y, 3), background, requires_grad=False)
+        # Create a white image on the correct device and dtype
+        # For non-grad visualizations use uint8 colors
         if color == "grad":
             # Pushing pos event to 128-255 and neg event to 0-127
             pos_rgb     = spike[[0,2,4],:,:]
@@ -93,10 +93,25 @@ class cam_evb():
             # white = merge_rgb.astype(torch.uint8).transpose(1,2,0)
             white = merge_rgb.permute(1,2,0)
         else:
-            # Add positive color dot to the image
-            # whit shape x,y,3 where x,y
-            # Add negative color dot to the image
-            white[spike[1]>=1] = c_neg
+            # Create white uint8 image on the same device as spike
+            white = torch.full((x, y, 3), background, requires_grad=False, dtype=torch.uint8, device=spike.device)
+            # convert colors to tensors on correct device
+            c_pos_t = torch.tensor(c_pos, dtype=torch.uint8, device=spike.device)
+            c_neg_t = torch.tensor(c_neg, dtype=torch.uint8, device=spike.device)
+
+            # Color positive and negative events (assume channel 0 = positive, 1 = negative)
+            if spike.shape[0] >= 2:
+                pos_mask = spike[0] >= 1
+                neg_mask = spike[1] >= 1
+                if pos_mask.any():
+                    white[pos_mask] = c_pos_t
+                if neg_mask.any():
+                    white[neg_mask] = c_neg_t
+            else:
+                # Fallback: mark any non-zero as negative
+                mask = spike.sum(dim=0) >= 1
+                if mask.any():
+                    white[mask] = c_neg_t
 
         return white
 
