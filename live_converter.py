@@ -78,6 +78,8 @@ def run_camera(camera_index: int = 0,
     cv2.createTrackbar('blur', window_name, 0, 31, lambda x: None)
     # temporal low-pass alpha (0..1000 -> 0.0..1.0) alpha close to 1 -> more smoothing
     cv2.createTrackbar('lp_alpha', window_name, 0, 1000, lambda x: None)
+    # display scale (pos/100 -> 0.01 .. 3.00), default 100 => 1.0
+    cv2.createTrackbar('scale', window_name, 100, 300, lambda x: None)
 
     # control state shared with mouse callback
     control_state = {
@@ -207,12 +209,23 @@ def run_camera(camera_index: int = 0,
             # Choose which image to show: EVB visualization or RGB
             display_img = rgb_display if control_state.get('view_rgb') else vis_display
 
-            # Overlay status text
-            status = f"merge={merge_methods[merge_idx]} thr={event_camera.threshold:.3f} noise={event_camera.noise:.3f} rec={'ON' if recording else 'OFF'} view={'RGB' if control_state.get('view_rgb') else 'EVB'}"
-            cv2.putText(display_img, status, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            # apply display scaling
+            scale_pos = cv2.getTrackbarPos('scale', window_name)
+            scale = float(scale_pos) / 100.0 if scale_pos > 0 else 1.0
+            if scale <= 0:
+                scale = 1.0
 
-            # draw On-screen buttons (VIEW Prev REC Next) at top-right
-            w_vis = display_img.shape[1]
+            scaled = cv2.resize(display_img, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+
+            # store current image size for mouse callback geometry (window coordinates)
+            control_state['img_size'] = (scaled.shape[1], scaled.shape[0])
+
+            # Overlay status text on scaled image
+            status = f"merge={merge_methods[merge_idx]} thr={event_camera.threshold:.3f} noise={event_camera.noise:.3f} rec={'ON' if recording else 'OFF'} view={'RGB' if control_state.get('view_rgb') else 'EVB'} scale={scale:.2f}"
+            cv2.putText(scaled, status, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+            # draw On-screen buttons (VIEW Prev REC Next) at top-right using scaled image geometry
+            w_vis = scaled.shape[1]
             btn_w = 70
             btn_h = 30
             spacing = 8
@@ -223,22 +236,19 @@ def run_camera(camera_index: int = 0,
             rec_rect = (x1 + (btn_w + spacing) * 2, y1, x1 + (btn_w + spacing) * 2 + btn_w, y1 + btn_h)
             next_rect = (x1 + (btn_w + spacing) * 3, y1, x1 + (btn_w + spacing) * 3 + btn_w, y1 + btn_h)
 
-            # draw rectangles
             view_color = (120, 120, 255) if control_state.get('view_rgb') else (200, 200, 200)
-            cv2.rectangle(display_img, (view_rect[0], view_rect[1]), (view_rect[2], view_rect[3]), view_color, -1)
-            cv2.rectangle(display_img, (prev_rect[0], prev_rect[1]), (prev_rect[2], prev_rect[3]), (200, 200, 200), -1)
-            # record button colored red when active
+            cv2.rectangle(scaled, (view_rect[0], view_rect[1]), (view_rect[2], view_rect[3]), view_color, -1)
+            cv2.rectangle(scaled, (prev_rect[0], prev_rect[1]), (prev_rect[2], prev_rect[3]), (200, 200, 200), -1)
             rec_color = (0, 0, 255) if recording else (50, 200, 50)
-            cv2.rectangle(display_img, (rec_rect[0], rec_rect[1]), (rec_rect[2], rec_rect[3]), rec_color, -1)
-            cv2.rectangle(display_img, (next_rect[0], next_rect[1]), (next_rect[2], next_rect[3]), (200, 200, 200), -1)
+            cv2.rectangle(scaled, (rec_rect[0], rec_rect[1]), (rec_rect[2], rec_rect[3]), rec_color, -1)
+            cv2.rectangle(scaled, (next_rect[0], next_rect[1]), (next_rect[2], next_rect[3]), (200, 200, 200), -1)
 
-            # text labels
-            cv2.putText(display_img, 'VIEW' if control_state.get('view_rgb') else 'EVB', (view_rect[0] + 8, view_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
-            cv2.putText(display_img, '<', (prev_rect[0] + 24, prev_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
-            cv2.putText(display_img, 'REC', (rec_rect[0] + 10, rec_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            cv2.putText(display_img, '>', (next_rect[0] + 26, next_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+            cv2.putText(scaled, 'VIEW' if control_state.get('view_rgb') else 'EVB', (view_rect[0] + 8, view_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            cv2.putText(scaled, '<', (prev_rect[0] + 24, prev_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+            cv2.putText(scaled, 'REC', (rec_rect[0] + 10, rec_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(scaled, '>', (next_rect[0] + 26, next_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
-            cv2.imshow(window_name, display_img)
+            cv2.imshow(window_name, scaled)
 
             # Handle recording
             if recording:
