@@ -84,7 +84,8 @@ def run_camera(camera_index: int = 0,
         'merge_idx': merge_idx,
         'recording': recording,
         'img_size': (cam_width, cam_height),
-        'lp_prev': None
+        'lp_prev': None,
+        'view_rgb': False
     }
 
     # mouse callback: toggle recording or change merge index based on click location
@@ -92,15 +93,16 @@ def run_camera(camera_index: int = 0,
         if event != cv2.EVENT_LBUTTONUP:
             return
         w, h = control_state.get('img_size', (cam_width, cam_height))
-        # button geometry
+        # button geometry (4 buttons: View, Prev, REC, Next)
         btn_w = 70
         btn_h = 30
         spacing = 8
-        x1 = w - 10 - (btn_w * 3 + spacing * 2)
+        x1 = w - 10 - (btn_w * 4 + spacing * 3)
         y1 = 10
-        prev_rect = (x1, y1, x1 + btn_w, y1 + btn_h)
-        rec_rect = (x1 + btn_w + spacing, y1, x1 + btn_w * 2 + spacing, y1 + btn_h)
-        next_rect = (x1 + (btn_w + spacing) * 2, y1, x1 + (btn_w + spacing) * 2 + btn_w, y1 + btn_h)
+        view_rect = (x1, y1, x1 + btn_w, y1 + btn_h)
+        prev_rect = (x1 + (btn_w + spacing), y1, x1 + (btn_w + spacing) + btn_w, y1 + btn_h)
+        rec_rect = (x1 + (btn_w + spacing) * 2, y1, x1 + (btn_w + spacing) * 2 + btn_w, y1 + btn_h)
+        next_rect = (x1 + (btn_w + spacing) * 3, y1, x1 + (btn_w + spacing) * 3 + btn_w, y1 + btn_h)
 
         def inside(r, px, py):
             return (px >= r[0] and px <= r[2] and py >= r[1] and py <= r[3])
@@ -112,6 +114,8 @@ def run_camera(camera_index: int = 0,
             control_state['merge_idx'] = (control_state['merge_idx'] + 1) % len(merge_methods)
         elif inside(rec_rect, x, y):
             control_state['recording'] = not control_state['recording']
+        elif inside(view_rect, x, y):
+            control_state['view_rgb'] = not control_state['view_rgb']
 
     cv2.setMouseCallback(window_name, mouse_callback)
 
@@ -197,34 +201,44 @@ def run_camera(camera_index: int = 0,
             # store current image size for mouse callback geometry
             control_state['img_size'] = (vis_display.shape[1], vis_display.shape[0])
 
-            # Overlay status text
-            status = f"merge={merge_methods[merge_idx]} thr={event_camera.threshold:.3f} noise={event_camera.noise:.3f} rec={'ON' if recording else 'OFF'}"
-            cv2.putText(vis_display, status, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            # Prepare RGB display image
+            rgb_display = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
-            # draw On-screen buttons (Prev REC Next) at top-right
-            w_vis = vis_display.shape[1]
+            # Choose which image to show: EVB visualization or RGB
+            display_img = rgb_display if control_state.get('view_rgb') else vis_display
+
+            # Overlay status text
+            status = f"merge={merge_methods[merge_idx]} thr={event_camera.threshold:.3f} noise={event_camera.noise:.3f} rec={'ON' if recording else 'OFF'} view={'RGB' if control_state.get('view_rgb') else 'EVB'}"
+            cv2.putText(display_img, status, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+            # draw On-screen buttons (VIEW Prev REC Next) at top-right
+            w_vis = display_img.shape[1]
             btn_w = 70
             btn_h = 30
             spacing = 8
-            x1 = w_vis - 10 - (btn_w * 3 + spacing * 2)
+            x1 = w_vis - 10 - (btn_w * 4 + spacing * 3)
             y1 = 10
-            prev_rect = (x1, y1, x1 + btn_w, y1 + btn_h)
-            rec_rect = (x1 + btn_w + spacing, y1, x1 + btn_w * 2 + spacing, y1 + btn_h)
-            next_rect = (x1 + (btn_w + spacing) * 2, y1, x1 + (btn_w + spacing) * 2 + btn_w, y1 + btn_h)
+            view_rect = (x1, y1, x1 + btn_w, y1 + btn_h)
+            prev_rect = (x1 + (btn_w + spacing), y1, x1 + (btn_w + spacing) + btn_w, y1 + btn_h)
+            rec_rect = (x1 + (btn_w + spacing) * 2, y1, x1 + (btn_w + spacing) * 2 + btn_w, y1 + btn_h)
+            next_rect = (x1 + (btn_w + spacing) * 3, y1, x1 + (btn_w + spacing) * 3 + btn_w, y1 + btn_h)
 
             # draw rectangles
-            cv2.rectangle(vis_display, (prev_rect[0], prev_rect[1]), (prev_rect[2], prev_rect[3]), (200, 200, 200), -1)
+            view_color = (120, 120, 255) if control_state.get('view_rgb') else (200, 200, 200)
+            cv2.rectangle(display_img, (view_rect[0], view_rect[1]), (view_rect[2], view_rect[3]), view_color, -1)
+            cv2.rectangle(display_img, (prev_rect[0], prev_rect[1]), (prev_rect[2], prev_rect[3]), (200, 200, 200), -1)
             # record button colored red when active
             rec_color = (0, 0, 255) if recording else (50, 200, 50)
-            cv2.rectangle(vis_display, (rec_rect[0], rec_rect[1]), (rec_rect[2], rec_rect[3]), rec_color, -1)
-            cv2.rectangle(vis_display, (next_rect[0], next_rect[1]), (next_rect[2], next_rect[3]), (200, 200, 200), -1)
+            cv2.rectangle(display_img, (rec_rect[0], rec_rect[1]), (rec_rect[2], rec_rect[3]), rec_color, -1)
+            cv2.rectangle(display_img, (next_rect[0], next_rect[1]), (next_rect[2], next_rect[3]), (200, 200, 200), -1)
 
             # text labels
-            cv2.putText(vis_display, '<', (prev_rect[0] + 24, prev_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
-            cv2.putText(vis_display, 'REC' if recording else 'REC', (rec_rect[0] + 10, rec_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            cv2.putText(vis_display, '>', (next_rect[0] + 26, next_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+            cv2.putText(display_img, 'VIEW' if control_state.get('view_rgb') else 'EVB', (view_rect[0] + 8, view_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+            cv2.putText(display_img, '<', (prev_rect[0] + 24, prev_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+            cv2.putText(display_img, 'REC', (rec_rect[0] + 10, rec_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(display_img, '>', (next_rect[0] + 26, next_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
-            cv2.imshow(window_name, vis_display)
+            cv2.imshow(window_name, display_img)
 
             # Handle recording
             if recording:
@@ -233,12 +247,12 @@ def run_camera(camera_index: int = 0,
                     out_name = os.path.join(output_dir, f"evb_record_{ts}_{merge_methods[merge_idx]}.mp4")
                     # construct fourcc manually to avoid static analysis issues
                     fourcc = (ord('m') | (ord('p') << 8) | (ord('4') << 16) | (ord('v') << 24))
-                    writer = cv2.VideoWriter(out_name, fourcc, fps, (vis_display.shape[1], vis_display.shape[0]))
+                    writer = cv2.VideoWriter(out_name, fourcc, fps, (display_img.shape[1], display_img.shape[0]))
                     if not writer.isOpened():
                         print(f"Failed to open video writer for {out_name}")
                         writer = None
                 if writer is not None:
-                    writer.write(vis_display)
+                    writer.write(display_img)
 
             key = cv2.waitKey(1) & 0xFF
             if key != 255:
@@ -246,16 +260,20 @@ def run_camera(camera_index: int = 0,
                 if key == ord('q'):
                     break
                 elif key == 32:  # space
-                    # toggle recording and sync the trackbar
-                    recording = not recording
-                    cv2.setTrackbarPos('record', window_name, int(recording))
+                    # toggle recording and update control_state
+                    control_state['recording'] = not control_state['recording']
+                    recording = control_state['recording']
                     if not recording and writer is not None:
                         writer.release()
                         writer = None
                     print(f"Recording {'started' if recording else 'stopped'}")
                 elif key == ord('m'):
-                    merge_idx = (merge_idx + 1) % len(merge_methods)
+                    control_state['merge_idx'] = (control_state['merge_idx'] + 1) % len(merge_methods)
+                    merge_idx = control_state['merge_idx']
                     print(f"merge -> {merge_methods[merge_idx]}")
+                elif key == ord('v'):
+                    control_state['view_rgb'] = not control_state['view_rgb']
+                    print(f"view -> {'RGB' if control_state['view_rgb'] else 'EVB'}")
                 elif key == ord('y'):
                     event_camera.threshold = float(event_camera.threshold) + 0.01
                     print(f"threshold -> {event_camera.threshold}")
