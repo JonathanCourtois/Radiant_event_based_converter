@@ -74,12 +74,17 @@ def run_camera(camera_index: int = 0,
     cv2.createTrackbar('threshold', window_name, thr_init_pos, 1000, lambda x: None)
     noise_init_pos = int(clamp(initial_noise if initial_noise is not None else 0.0, 0.0, max_noise_val) / max_noise_val * 1000)
     cv2.createTrackbar('noise', window_name, noise_init_pos, 1000, lambda x: None)
+    # spatial blur kernel size (0..31 -> odd sizes, 0 = no blur)
+    cv2.createTrackbar('blur', window_name, 0, 31, lambda x: None)
+    # temporal low-pass alpha (0..1000 -> 0.0..1.0) alpha close to 1 -> more smoothing
+    cv2.createTrackbar('lp_alpha', window_name, 0, 1000, lambda x: None)
 
     # control state shared with mouse callback
     control_state = {
         'merge_idx': merge_idx,
         'recording': recording,
-        'img_size': (cam_width, cam_height)
+        'img_size': (cam_width, cam_height),
+        'lp_prev': None
     }
 
     # mouse callback: toggle recording or change merge index based on click location
@@ -121,6 +126,29 @@ def run_camera(camera_index: int = 0,
 
             # Convert BGR (OpenCV) to RGB
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            # Apply spatial and temporal low-pass filtering based on trackbars
+            blur_k = cv2.getTrackbarPos('blur', window_name)
+            # ensure odd kernel size for Gaussian (0 => no blur)
+            if blur_k > 0:
+                if blur_k % 2 == 0:
+                    blur_k += 1
+                rgb = cv2.GaussianBlur(rgb, (blur_k, blur_k), 0)
+
+            lp_alpha_pos = cv2.getTrackbarPos('lp_alpha', window_name)
+            lp_alpha = float(lp_alpha_pos) / 1000.0
+            if lp_alpha > 0.0:
+                prev = control_state.get('lp_prev')
+                if prev is None:
+                    control_state['lp_prev'] = rgb.astype(np.float32)
+                else:
+                    # EMA: new = alpha*prev + (1-alpha)*current  (alpha closer to 1 => more smoothing)
+                    prev = prev.astype(np.float32)
+                    control_state['lp_prev'] = (lp_alpha * prev + (1.0 - lp_alpha) * rgb.astype(np.float32))
+                rgb = np.clip(control_state['lp_prev'], 0, 255).astype(np.uint8)
+            else:
+                # reset previous when lp disabled
+                control_state['lp_prev'] = None
 
             # Prepare tensor (C,H,W) float on correct device
             img_t = torch.from_numpy(rgb).permute(2, 0, 1).to(event_camera.device).float()
