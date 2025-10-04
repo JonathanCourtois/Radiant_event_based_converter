@@ -127,7 +127,6 @@ parser.add_argument('--noise_level',    type=float, default=0.8,    help='Noise 
 parser.add_argument('--merge_method',   type=str,   default="first_channel", help='Method to merge the channels to RGB. Can Be "first_channel", "polarity" or "channel"')
 parser.add_argument('--fps',            type=int,   default=None,   help='Fps of the output video.')
 parser.add_argument('--input_rate',     type=int, default=None,        help='Input rate of the video (convert every n frame).')
-parser.add_argument('--save_spike_mat', action='store_true', help='Save the spike matrix as npy file.')
 args = parser.parse_args()
 
 

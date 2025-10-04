@@ -39,7 +39,6 @@ python ./video_converter.py [-h] [--output_path OUTPUT_PATH] [--threshold THRESH
 - `--fps FPS`: Frames per second of the output video.
 - `--change_input_rate`: Change the input rate of the video.
 - `--input_rate INPUT_RATE`: Input rate of the video (convert every n frames).
-- `--save_spike_mat`: Save the spike matrix as an `.npy` file.
 
 ### Examples
 
