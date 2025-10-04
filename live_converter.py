@@ -69,15 +69,48 @@ def run_camera(camera_index: int = 0,
     max_threshold_val = 2.0  # trackbar maps 0..1000 -> 0..max_threshold_val
     max_noise_val = 2.0      # trackbar maps 0..1000 -> 0..max_noise_val
 
-    # create trackbars: merge (discrete), threshold (0..1000), noise (0..1000), record (0/1)
-    cv2.createTrackbar('merge', window_name, 0, max(0, len(merge_methods) - 1), lambda x: None)
+    # create trackbars: threshold (0..1000), noise (0..1000)
     thr_init_pos = int(clamp(initial_threshold, 0.0, max_threshold_val) / max_threshold_val * 1000)
     cv2.createTrackbar('threshold', window_name, thr_init_pos, 1000, lambda x: None)
     noise_init_pos = int(clamp(initial_noise if initial_noise is not None else 0.0, 0.0, max_noise_val) / max_noise_val * 1000)
     cv2.createTrackbar('noise', window_name, noise_init_pos, 1000, lambda x: None)
-    cv2.createTrackbar('record', window_name, 0, 1, lambda x: None)
 
-    print("Controls: q=quit, SPACE=toggle record, or use the trackbars (merge, threshold, noise, record)")
+    # control state shared with mouse callback
+    control_state = {
+        'merge_idx': merge_idx,
+        'recording': recording,
+        'img_size': (cam_width, cam_height)
+    }
+
+    # mouse callback: toggle recording or change merge index based on click location
+    def mouse_callback(event, x, y, flags, param):
+        if event != cv2.EVENT_LBUTTONUP:
+            return
+        w, h = control_state.get('img_size', (cam_width, cam_height))
+        # button geometry
+        btn_w = 70
+        btn_h = 30
+        spacing = 8
+        x1 = w - 10 - (btn_w * 3 + spacing * 2)
+        y1 = 10
+        prev_rect = (x1, y1, x1 + btn_w, y1 + btn_h)
+        rec_rect = (x1 + btn_w + spacing, y1, x1 + btn_w * 2 + spacing, y1 + btn_h)
+        next_rect = (x1 + (btn_w + spacing) * 2, y1, x1 + (btn_w + spacing) * 2 + btn_w, y1 + btn_h)
+
+        def inside(r, px, py):
+            return (px >= r[0] and px <= r[2] and py >= r[1] and py <= r[3])
+
+        if inside(prev_rect, x, y):
+            # previous merge
+            control_state['merge_idx'] = (control_state['merge_idx'] - 1) % len(merge_methods)
+        elif inside(next_rect, x, y):
+            control_state['merge_idx'] = (control_state['merge_idx'] + 1) % len(merge_methods)
+        elif inside(rec_rect, x, y):
+            control_state['recording'] = not control_state['recording']
+
+    cv2.setMouseCallback(window_name, mouse_callback)
+
+    print("Controls: q=quit, SPACE=toggle record, or click the on-screen buttons (Prev / REC / Next). Use sliders for threshold/noise.")
 
     try:
         while True:
@@ -120,24 +153,48 @@ def run_camera(camera_index: int = 0,
             else:
                 vis_display = vis_np
 
-            # Read trackbar positions and apply
-            merge_idx = cv2.getTrackbarPos('merge', window_name)
+            # Read trackbar positions for numeric parameters
             thr_pos = cv2.getTrackbarPos('threshold', window_name)
             noise_pos = cv2.getTrackbarPos('noise', window_name)
-            record_tr = cv2.getTrackbarPos('record', window_name)
 
             # map trackbar values to real parameters
             event_camera.threshold = float(thr_pos) / 1000.0 * max_threshold_val
-            # set noise (use 0.0 instead of None when slider at 0)
             noise_val = float(noise_pos) / 1000.0 * max_noise_val
             event_camera.noise = noise_val if noise_val > 0.0 else 0.0
 
-            # sync recording flag from trackbar (keyboard toggles will update trackbar below)
-            recording = bool(record_tr)
+            # Read merge and recording state from control_state
+            merge_idx = control_state['merge_idx']
+            recording = control_state['recording']
+
+            # store current image size for mouse callback geometry
+            control_state['img_size'] = (vis_display.shape[1], vis_display.shape[0])
 
             # Overlay status text
             status = f"merge={merge_methods[merge_idx]} thr={event_camera.threshold:.3f} noise={event_camera.noise:.3f} rec={'ON' if recording else 'OFF'}"
             cv2.putText(vis_display, status, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+            # draw On-screen buttons (Prev REC Next) at top-right
+            w_vis = vis_display.shape[1]
+            btn_w = 70
+            btn_h = 30
+            spacing = 8
+            x1 = w_vis - 10 - (btn_w * 3 + spacing * 2)
+            y1 = 10
+            prev_rect = (x1, y1, x1 + btn_w, y1 + btn_h)
+            rec_rect = (x1 + btn_w + spacing, y1, x1 + btn_w * 2 + spacing, y1 + btn_h)
+            next_rect = (x1 + (btn_w + spacing) * 2, y1, x1 + (btn_w + spacing) * 2 + btn_w, y1 + btn_h)
+
+            # draw rectangles
+            cv2.rectangle(vis_display, (prev_rect[0], prev_rect[1]), (prev_rect[2], prev_rect[3]), (200, 200, 200), -1)
+            # record button colored red when active
+            rec_color = (0, 0, 255) if recording else (50, 200, 50)
+            cv2.rectangle(vis_display, (rec_rect[0], rec_rect[1]), (rec_rect[2], rec_rect[3]), rec_color, -1)
+            cv2.rectangle(vis_display, (next_rect[0], next_rect[1]), (next_rect[2], next_rect[3]), (200, 200, 200), -1)
+
+            # text labels
+            cv2.putText(vis_display, '<', (prev_rect[0] + 24, prev_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+            cv2.putText(vis_display, 'REC' if recording else 'REC', (rec_rect[0] + 10, rec_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+            cv2.putText(vis_display, '>', (next_rect[0] + 26, next_rect[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
             cv2.imshow(window_name, vis_display)
 
