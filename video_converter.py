@@ -63,14 +63,18 @@ def convert_mp4_video(path_to_video, output_path=None, event_camera=None, merge_
     i   = 0
     
     spike_video_frames  = []
-    rgb_video_frames    = []
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
     else:
         device = torch.device("cpu")
 
-    # out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (height, width))
+    # Check FPS
+    if args.fps is not None:
+        fps = args.fps
+        print(f"Using custom fps: {fps}")
+
+    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width,height))
     with torch.no_grad():
         with tqdm.tqdm(total=frame_count) as pbar:
             while ret:
@@ -103,42 +107,17 @@ def convert_mp4_video(path_to_video, output_path=None, event_camera=None, merge_
                 else:
                     raise ValueError(f"merge_method {merge_method} not supported.") 
                     
-                rgb_video_frames.append(rgb_out.cpu().numpy().astype(np.uint8))
-                # out.write(rgb_out.cpu().numpy().astype(np.uint8))
+                # rgb_video_frames.append(rgb_out.cpu().numpy().astype(np.uint8))
+                out.write(rgb_out.cpu().numpy().astype(np.uint8))
                 i += 1
                 pbar.update(1)
             cap.release()
             cv2.destroyAllWindows()
             pbar.close()
 
-    #     out.release()
-    # raise()
-
-    # Save the video
-    print(f"fps: {fps} frame_count: {frame_count} rgb_video_frames: {len(rgb_video_frames)}")
-    if args is not None and args.fps is not None:
-        fps = args.fps
-        print(f"fps adjusted to {fps}")
-    elif frame_count != len(rgb_video_frames):
-         # adjust the fps to match the number of frames
-        fps = frame_count/len(rgb_video_frames)
-        print(f"fps adjusted to {fps}")
-
-    if output_path is not None:
-        print(f"Saving video to {output_path}")
-        out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (rgb_video_frames[0].shape[1], rgb_video_frames[0].shape[0]))
-        for i in range(len(rgb_video_frames)):
-            frame = rgb_video_frames.pop(0)
-            out.write(frame)
         out.release()
-
-    if args is not None and args.save_spike_mat:
-        spike_video_frames = np.array(spike_video_frames)
-        if output_path is None:
-            output_path = "./.mp4"
-        spike_mat_path = output_path.replace(".mp4", "_spike_mat.npy")
-        print(f"Saving spike matrix to {spike_mat_path}")
-        np.save(spike_mat_path, spike_video_frames)
+        
+        # other features unavailable for now
 
 parser = argparse.ArgumentParser(description='Convert RGB video to Event Based video.')
 parser.add_argument('video_path',       type=str,   help='Path to the video to convert.')
@@ -158,13 +137,14 @@ def main():
     video_name = video_path_test.split("/")[-1].split(".")[0]
     if not os.path.exists(args.output_path):
         os.makedirs(args.output_path)
-    out_path   = os.path.join(args.output_path, f"EVB_{video_name}_{args.merge_method}.mp4")
 
     cap = cv2.VideoCapture(video_path_test)
     frame_count, fps, width, height = get_cv2_infos(cap)
     video_res = (3, height, width)
     cap.release()
 
+    fps = args.fps if args.fps is not None else fps
+    out_path   = os.path.join(args.output_path, f"EVB_{video_name}_{args.merge_method}_{fps}.mp4")
     event_camera = cam_evb(threshold=args.threshold, input_resolution=video_res, noise_level=args.noise_level, multi_threshold=True)
 
     convert_mp4_video(video_path_test, output_path=out_path, event_camera=event_camera, merge_method=args.merge_method, args=args)
