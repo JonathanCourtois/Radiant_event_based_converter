@@ -65,7 +65,19 @@ def run_camera(camera_index: int = 0,
     window_name = "EVB Live"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
-    print("Controls: q=quit, SPACE=toggle record, m=cycle merge, y/r=th+/- , n/b=noise+/-")
+    # Trackbar parameters
+    max_threshold_val = 2.0  # trackbar maps 0..1000 -> 0..max_threshold_val
+    max_noise_val = 2.0      # trackbar maps 0..1000 -> 0..max_noise_val
+
+    # create trackbars: merge (discrete), threshold (0..1000), noise (0..1000), record (0/1)
+    cv2.createTrackbar('merge', window_name, 0, max(0, len(merge_methods) - 1), lambda x: None)
+    thr_init_pos = int(clamp(initial_threshold, 0.0, max_threshold_val) / max_threshold_val * 1000)
+    cv2.createTrackbar('threshold', window_name, thr_init_pos, 1000, lambda x: None)
+    noise_init_pos = int(clamp(initial_noise if initial_noise is not None else 0.0, 0.0, max_noise_val) / max_noise_val * 1000)
+    cv2.createTrackbar('noise', window_name, noise_init_pos, 1000, lambda x: None)
+    cv2.createTrackbar('record', window_name, 0, 1, lambda x: None)
+
+    print("Controls: q=quit, SPACE=toggle record, or use the trackbars (merge, threshold, noise, record)")
 
     try:
         while True:
@@ -108,6 +120,21 @@ def run_camera(camera_index: int = 0,
             else:
                 vis_display = vis_np
 
+            # Read trackbar positions and apply
+            merge_idx = cv2.getTrackbarPos('merge', window_name)
+            thr_pos = cv2.getTrackbarPos('threshold', window_name)
+            noise_pos = cv2.getTrackbarPos('noise', window_name)
+            record_tr = cv2.getTrackbarPos('record', window_name)
+
+            # map trackbar values to real parameters
+            event_camera.threshold = float(thr_pos) / 1000.0 * max_threshold_val
+            # set noise (use 0.0 instead of None when slider at 0)
+            noise_val = float(noise_pos) / 1000.0 * max_noise_val
+            event_camera.noise = noise_val if noise_val > 0.0 else 0.0
+
+            # sync recording flag from trackbar (keyboard toggles will update trackbar below)
+            recording = bool(record_tr)
+
             # Overlay status text
             status = f"merge={merge_methods[merge_idx]} thr={event_camera.threshold:.3f} noise={event_camera.noise:.3f} rec={'ON' if recording else 'OFF'}"
             cv2.putText(vis_display, status, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
@@ -134,7 +161,9 @@ def run_camera(camera_index: int = 0,
                 if key == ord('q'):
                     break
                 elif key == 32:  # space
+                    # toggle recording and sync the trackbar
                     recording = not recording
+                    cv2.setTrackbarPos('record', window_name, int(recording))
                     if not recording and writer is not None:
                         writer.release()
                         writer = None
