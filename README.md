@@ -130,8 +130,6 @@ White mode:
 Window icon (for reference):
 
 ![Windows icon](img_src/Windows.png)
-## Images example 
-%% add images forom img_scr/
 
 ## Citation
 
